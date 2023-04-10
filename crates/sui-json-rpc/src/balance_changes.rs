@@ -55,6 +55,8 @@ pub async fn get_balance_changes_from_effect<P: ObjectProvider<Error = E>, E>(
         &effects
             .modified_at_versions()
             .iter()
+            // We filter here for objects that don't exist yet, because they can't be looked up.
+            .filter(|(_, version)| version.value() != 1)
             .map(|(id, version)| (*id, *version, input_objs_to_digest.get(id).cloned()))
             .collect::<Vec<_>>(),
         &all_mutated,
