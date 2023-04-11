@@ -1,0 +1,12 @@
+processed 3 tasks
+
+init:
+A: object(103)
+
+task 1 'publish'. lines 6-10:
+created: object(105), object(106)
+mutated: object(104)
+
+task 2 'upgrade'. lines 12-17:
+Error: Transaction Effects Status: Publish Error, Non-zero Address. The modules in the package must have their self-addresses set to zero.
+Execution Error: ExecutionError: ExecutionError { inner: ExecutionErrorInner { kind: PublishErrorNonZeroAddress, source: Some("Publishing module M1 with non-zero address is not allowed"), command: Some(1) } }
