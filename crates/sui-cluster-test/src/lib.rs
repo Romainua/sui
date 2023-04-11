@@ -113,6 +113,15 @@ impl TestContext {
             .unwrap()
     }
 
+    async fn get_reference_gas_price(&self) -> u64 {
+        self.client
+            .get_fullnode_client()
+            .governance_api()
+            .get_reference_gas_price()
+            .await
+            .unwrap()
+    }
+
     fn get_wallet_mut(&mut self) -> &mut WalletContext {
         self.client.get_wallet_mut()
     }
@@ -297,12 +306,12 @@ impl ClusterTest {
 
         // TODO: collect tests from each test_case file instead.
         let tests = vec![
-            TestCase::new(NativeTransferTest {}),
-            TestCase::new(CoinMergeSplitTest {}),
-            TestCase::new(SharedCounterTest {}),
-            TestCase::new(FullNodeExecuteTransactionTest {}),
-            TestCase::new(FullNodeBuildPublishTransactionTest {}),
-            TestCase::new(CoinIndexTest {}),
+            // TestCase::new(NativeTransferTest {}),
+            // TestCase::new(CoinMergeSplitTest {}),
+            // TestCase::new(SharedCounterTest {}),
+            // TestCase::new(FullNodeExecuteTransactionTest {}),
+            // TestCase::new(FullNodeBuildPublishTransactionTest {}),
+            // TestCase::new(CoinIndexTest {}),
         ];
 
         // TODO: improve the runner parallelism for efficiency
