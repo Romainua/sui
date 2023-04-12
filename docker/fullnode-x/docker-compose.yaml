@@ -3,25 +3,26 @@ version: "3.9"
 services:
 
   fullnode:
-    build:
-      context: ../..
-      dockerfile: ./docker/sui-node/Dockerfile
-      args:
+#    build:
+#      context: ../..
+#      dockerfile: ./docker/sui-node/Dockerfile
+#      args:
         # update with git sha of whichever branch you're building on.
-        GIT_REVISION: db24658bc9
-        BUILD_DATE: today
+#        GIT_REVISION: db24658bc9
+#        BUILD_DATE: today
 
     environment:
       - LD_PRELOAD
       - RUST_JSON_LOG="true"
       - RUST_LOG="info"
       # don't use debug, it generates volumes of data.
-    image: sui-node:latest
+    image: mysten/sui-node:5dd7033c1f26deab3eb77b40216f85f3b9e221c2
     command: /opt/sui/entry.sh
     restart: unless-stopped
     # populate your local ./fullnode/config/ directory with fullnode.yaml and genesis.blob for the network you want to use.
     volumes:
       - ./fullnode:/opt/sui
+      - suidb:/sui/suidb:rw
     ports:
       - 9000
       - 9184
@@ -30,11 +31,11 @@ services:
         protocol: udp
 
   indexer:
-    build:
-      context: ../..
-      dockerfile: ./docker/sui-indexer/Dockerfile
-    image: sui-indexer:latest
-    command: /opt/sui/indexer.sh
+#    build:
+#      context: ../..
+#      dockerfile: ./docker/sui-indexer/Dockerfile
+    image: mysten/sui-indexer:a63f425b9999c7fdfe483598720a9effc0acdc9e
+    command: sui-indexer --db-url postgres://postgres:admin@postgres:5432/sui_indexer_testnet --rpc-client-url http://fullnode:9000
     restart: unless-stopped
     volumes:
       - ./indexer:/opt/sui
@@ -53,7 +54,10 @@ services:
       - fullnode
 
   postgres:
-    image: postgres:15
+    build:
+      context: .
+      dockerfile: ./postgres/Dockerfile.postgres
+    image: custom-postgres:15
     restart: unless-stopped
     environment:
       - POSTGRES_PASSWORD=admin
@@ -61,4 +65,9 @@ services:
       - target: 5432
         published: 5432
     volumes:
-      - ./postgres/data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/pg_hba.conf:/var/lib/postgresql/data/pg_hba.conf
+      - ./postgres/postgresql.conf:/var/lib/postgresql/data/postgresql.conf
+volumes:
+  suidb:
+  postgres_data:
