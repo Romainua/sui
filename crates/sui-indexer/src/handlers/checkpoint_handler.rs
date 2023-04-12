@@ -9,7 +9,6 @@ use futures::future::join_all;
 use futures::FutureExt;
 use jsonrpsee::http_client::HttpClient;
 use move_core_types::ident_str;
-use prometheus::Registry;
 use tokio::sync::{
     mpsc::{self, Receiver, Sender},
     Mutex,
@@ -32,7 +31,7 @@ use sui_types::sui_system_state::sui_system_state_summary::SuiSystemStateSummary
 use sui_types::SUI_SYSTEM_ADDRESS;
 
 use crate::errors::IndexerError;
-use crate::metrics::IndexerCheckpointHandlerMetrics;
+use crate::metrics::IndexerMetrics;
 use crate::models::checkpoints::Checkpoint;
 use crate::models::epoch::{DBEpochInfo, SystemEpochInfoEvent};
 use crate::models::objects::{DeletedObject, Object, ObjectStatus};
@@ -58,7 +57,7 @@ pub struct CheckpointHandler<S> {
     state: S,
     http_client: HttpClient,
     event_handler: Arc<EventHandler>,
-    metrics: IndexerCheckpointHandlerMetrics,
+    metrics: IndexerMetrics,
     config: IndexerConfig,
     checkpoint_sender: Arc<Mutex<Sender<TemporaryCheckpointStore>>>,
     checkpoint_receiver: Arc<Mutex<Receiver<TemporaryCheckpointStore>>>,
@@ -77,7 +76,7 @@ where
         state: S,
         http_client: HttpClient,
         event_handler: Arc<EventHandler>,
-        prometheus_registry: &Registry,
+        metrics: IndexerMetrics,
         config: &IndexerConfig,
     ) -> Self {
         let (checkpoint_sender, checkpoint_receiver) = mpsc::channel(CHECKPOINT_QUEUE_LIMIT);
@@ -88,7 +87,7 @@ where
             state,
             http_client,
             event_handler,
-            metrics: IndexerCheckpointHandlerMetrics::new(prometheus_registry),
+            metrics,
             config: config.clone(),
             checkpoint_sender: Arc::new(Mutex::new(checkpoint_sender)),
             checkpoint_receiver: Arc::new(Mutex::new(checkpoint_receiver)),
@@ -350,6 +349,11 @@ where
                 // otherwise send it to channel to be committed later.
                 if epoch.last_epoch.is_none() {
                     let epoch_db_guard = self.metrics.epoch_db_commit_latency.start_timer();
+                    let mut persist_first_epoch_res = self.state.persist_epoch(&epoch).await;
+                    while persist_first_epoch_res.is_err() {
+                        warn!("Failed to persist first epoch, retrying...");
+                        persist_first_epoch_res = self.state.persist_epoch(&epoch).await;
+                    }
                     self.state.persist_epoch(&epoch).await?;
                     epoch_db_guard.stop_and_record();
                     self.metrics.total_epoch_committed.inc();
@@ -618,7 +622,7 @@ where
                     }
                     epoch_db_guard.stop_and_record();
                     self.metrics.total_epoch_committed.inc();
-                    info!("Epoch {} committed.", indexed_epoch.new_epoch.epoch,);
+                    info!("Epoch {} committed.", indexed_epoch.new_epoch.epoch);
                 }
             } else {
                 // sleep for 1 sec to avoid occupying the mutex, as this happens once per epoch / day
@@ -1041,16 +1045,17 @@ pub async fn fetch_changed_objects(
     })
 }
 
-pub fn to_changed_db_objects(
-    changed_objects: Vec<(ObjectStatus, SuiObjectData)>,
-    epoch: u64,
-    checkpoint: Option<CheckpointSequenceNumber>,
-) -> Vec<Object> {
-    changed_objects
-        .into_iter()
-        .map(|(status, o)| Object::from(epoch, checkpoint.map(<u64>::from), &status, &o))
-        .collect::<Vec<_>>()
-}
+// TODO(gegaowp): temp. disable fast-path
+// pub fn to_changed_db_objects(
+//     changed_objects: Vec<(ObjectStatus, SuiObjectData)>,
+//     epoch: u64,
+//     checkpoint: Option<CheckpointSequenceNumber>,
+// ) -> Vec<Object> {
+//     changed_objects
+//         .into_iter()
+//         .map(|(status, o)| Object::from(epoch, checkpoint.map(<u64>::from), &status, &o))
+//         .collect::<Vec<_>>()
+// }
 
 pub fn get_deleted_db_objects(
     effects: &SuiTransactionBlockEffects,

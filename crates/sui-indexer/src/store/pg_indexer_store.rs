@@ -45,6 +45,7 @@ use sui_types::messages_checkpoint::{
 use sui_types::object::ObjectRead;
 
 use crate::errors::{Context, IndexerError};
+use crate::metrics::IndexerMetrics;
 use crate::models::addresses::Address;
 use crate::models::checkpoints::Checkpoint;
 use crate::models::epoch::DBEpochInfo;
@@ -99,12 +100,19 @@ struct TempDigestTable {
 #[derive(Clone)]
 pub struct PgIndexerStore {
     cp: AsyncPgConnectionPool,
+    // MUSTFIX(gegaowp): temporarily disable partition management.
+    #[allow(dead_code)]
     partition_manager: PartitionManager,
     module_cache: Arc<SyncModuleCache<IndexerModuleResolver>>,
+    metrics: IndexerMetrics,
 }
 
 impl PgIndexerStore {
-    pub async fn new(cp: AsyncPgConnectionPool, blocking_cp: PgConnectionPool) -> Self {
+    pub async fn new(
+        cp: AsyncPgConnectionPool,
+        blocking_cp: PgConnectionPool,
+        metrics: IndexerMetrics,
+    ) -> Self {
         let module_cache = Arc::new(SyncModuleCache::new(IndexerModuleResolver::new(
             blocking_cp.clone(),
         )));
@@ -112,6 +120,7 @@ impl PgIndexerStore {
             cp: cp.clone(),
             partition_manager: PartitionManager::new(blocking_cp).await.unwrap(),
             module_cache,
+            metrics,
         }
     }
 
@@ -1475,15 +1484,20 @@ WHERE e1.epoch = e2.epoch
     }
 
     async fn persist_epoch(&self, data: &TemporaryEpochStore) -> Result<(), IndexerError> {
-        let last_epoch_cp_id = if data.last_epoch.is_none() {
-            0
-        } else {
-            self.get_current_epoch().await?.first_checkpoint_id as i64
-        };
-
-        self.partition_manager
-            .advance_epoch(&data.new_epoch, last_epoch_cp_id)
-            .await?;
+        // MUSTFIX(gegaowp): temporarily disable the epoch advance logic.
+        // let last_epoch_cp_id = if data.last_epoch.is_none() {
+        //     0
+        // } else {
+        //     self.get_current_epoch().await?.first_checkpoint_id as i64
+        // };
+        if data.last_epoch.is_none() {
+            let last_epoch_cp_id = 0;
+            self.partition_manager
+                .advance_epoch(&data.new_epoch, last_epoch_cp_id)
+                .await?;
+        }
+        let epoch = data.new_epoch.epoch;
+        info!("Persisting epoch {}", epoch);
 
         transactional!(&self.cp, |conn| async {
             if let Some(last_epoch) = &data.last_epoch {
@@ -1536,11 +1550,16 @@ WHERE e1.epoch = e2.epoch
                 .await
         }
         .scope_boxed())?;
+        info!("Persisted epoch {}", epoch);
         Ok(())
     }
 
     fn module_cache(&self) -> &Self::ModuleCache {
         &self.module_cache
+    }
+
+    fn indexer_metrics(&self) -> &IndexerMetrics {
+        &self.metrics
     }
 
     async fn get_epochs(
@@ -1758,6 +1777,8 @@ impl PartitionManager {
         Ok(manager)
     }
 
+    // MUSTFIX(gegaowp): temporarily disable partition management.
+    #[allow(dead_code)]
     async fn advance_epoch(
         &self,
         new_epoch: &DBEpochInfo,
@@ -1777,7 +1798,9 @@ impl PartitionManager {
                         "ALTER TABLE {table} DETACH PARTITION {table}_partition_{last_epoch_id};"
                     );
                     let attach_partition_with_new_range = format!("ALTER TABLE {table} ATTACH PARTITION {table}_partition_{last_epoch_id} FOR VALUES FROM ('{last_epoch_start_cp}') TO ('{next_epoch_start_cp}');");
+                    info! {"Changed last epoch partition {last_epoch_id} for {table}, with new range {last_epoch_start_cp} to {next_epoch_start_cp}"};
                     let new_partition = format!("CREATE TABLE {table}_partition_{next_epoch_id} PARTITION OF {table} FOR VALUES FROM ({next_epoch_start_cp}) TO (MAXVALUE);");
+                    info! {"Created epoch partition {next_epoch_id} for {table}, with new range {next_epoch_start_cp} to MAXVALUE"};
                     diesel::RunQueryDsl::execute(diesel::sql_query(detach_partition), conn)?;
                     diesel::RunQueryDsl::execute(
                         diesel::sql_query(attach_partition_with_new_range),
